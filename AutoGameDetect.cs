@@ -1,3 +1,13 @@
+// AutoGameDetect — 4K 显示器自动分辨率切换工具
+// Copyright (c) 2025 keitarol
+//
+// Licensed under the MIT License.
+// You may obtain a copy of the License at
+//     https://opensource.org/licenses/MIT
+//
+// 本项目基于 MIT 协议开源，可自由使用、修改、分发，
+// 但需保留上述版权声明。详见仓库 LICENSE 文件。
+
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;

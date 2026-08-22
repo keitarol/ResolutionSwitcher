@@ -23,6 +23,119 @@ namespace AutoGameDetect
 {
     public class AppContext : ApplicationContext
     {
+        // ================================================================
+        //  Localization: 跟随系统语言，zh-* 显示中文，其余全部显示英文
+        // ================================================================
+        private static readonly bool IsChinese =
+            System.Globalization.CultureInfo.CurrentUICulture.Name.StartsWith("zh",
+                StringComparison.OrdinalIgnoreCase);
+
+        // 中文文案（key 统一，便于对照维护）
+        private static readonly Dictionary<string, string> Dict_ZH = new Dictionary<string, string>
+        {
+            { "win_title", "分辨率自动监控 - 设置" },
+            { "lbl_info", "选择需要自动切换到 2K 的游戏：" },
+            { "btn_scan", "🔄 扫描已安装游戏" },
+            { "btn_scanning", "扫描中..." },
+            { "lbl_target", "目标分辨率:" },
+            { "lbl_current", "当前: {0}×{1}" },
+            { "lbl_proc", "进程名(不含.exe):" },
+            { "btn_add", "添加手动" },
+            { "btn_del", "删除选中" },
+            { "lbl_steam", "Steam 路径(可选):" },
+            { "btn_browse", "浏览..." },
+            { "dlg_steam_desc", "选择 Steam 安装目录（含 steam.exe 的文件夹）" },
+            { "lbl_steam_hint", "留空 = 自动检测（默认路径 / 注册表，支持任意安装位置）" },
+            { "btn_close", "关闭" },
+            { "tray_text", "分辨率自动监控\n{0} | 监控 {1} 个游戏" },
+            { "menu_settings", "设置监控游戏" },
+            { "menu_pause", "⏸ 暂停监控" },
+            { "menu_resume", "▶ 恢复监控" },
+            { "menu_restore", "立即恢复 4K" },
+            { "menu_quit", "退出" },
+            { "status_paused", "⏸ 已暂停" },
+            { "status_running", "▶ 运行中" },
+            { "status_fmt", "状态: {0}  |  监控 {1} 个游戏" },
+            { "msg_already", "该游戏已在列表中。" },
+            { "title_hint", "提示" },
+            { "scan_done", "扫描完成" },
+            { "scan_added", "，新增 {0} 个游戏" },
+            { "scan_removed", "，移除 {0} 个已卸载的游戏" },
+            { "scan_fresh", "，列表已是最新" },
+            { "scan_prompt", "。\n请勾选要自动监控的游戏。" },
+            { "title_scan_done", "扫描完成" },
+            { "balloon_start_title", "游戏检测" },
+            { "balloon_start", "检测到 {0} 已启动，已切换到 {1}×{2}" },
+            { "balloon_exit_title", "游戏退出" },
+            { "balloon_exit", "已恢复原始分辨率 {0}×{1}" },
+            { "manual_suffix", " (手动)" },
+            { "main_already", "分辨率自动监控已在运行！\n请在系统托盘图标上操作。" },
+            { "title_already", "已在运行" },
+        };
+
+        // 英文文案
+        private static readonly Dictionary<string, string> Dict_En = new Dictionary<string, string>
+        {
+            { "win_title", "Resolution Switcher - Settings" },
+            { "lbl_info", "Select games to auto-switch to 2K:" },
+            { "btn_scan", "🔄 Scan Installed Games" },
+            { "btn_scanning", "Scanning..." },
+            { "lbl_target", "Target resolution:" },
+            { "lbl_current", "Current: {0}×{1}" },
+            { "lbl_proc", "Process name (no .exe):" },
+            { "btn_add", "Add Manually" },
+            { "btn_del", "Remove Selected" },
+            { "lbl_steam", "Steam path (optional):" },
+            { "btn_browse", "Browse..." },
+            { "dlg_steam_desc", "Select the Steam installation folder (the one containing steam.exe)" },
+            { "lbl_steam_hint", "Leave blank = auto-detect (default path / registry, any install location)" },
+            { "btn_close", "Close" },
+            { "tray_text", "Resolution Switcher\n{0} | Monitoring {1} game(s)" },
+            { "menu_settings", "Settings" },
+            { "menu_pause", "⏸ Pause Monitoring" },
+            { "menu_resume", "▶ Resume Monitoring" },
+            { "menu_restore", "Restore 4K Now" },
+            { "menu_quit", "Exit" },
+            { "status_paused", "⏸ Paused" },
+            { "status_running", "▶ Running" },
+            { "status_fmt", "Status: {0} | Monitoring {1} game(s)" },
+            { "msg_already", "This game is already in the list." },
+            { "title_hint", "Notice" },
+            { "scan_done", "Scan complete" },
+            { "scan_added", ", {0} new game(s) added" },
+            { "scan_removed", ", {0} uninstalled game(s) removed" },
+            { "scan_fresh", ", the list is already up to date" },
+            { "scan_prompt", ".\nCheck the games you want to monitor." },
+            { "title_scan_done", "Scan Complete" },
+            { "balloon_start_title", "Game Detected" },
+            { "balloon_start", "{0} has started. Switched to {1}×{2}" },
+            { "balloon_exit_title", "Game Exited" },
+            { "balloon_exit", "Restored original resolution {0}×{1}" },
+            { "manual_suffix", " (manual)" },
+            { "main_already", "Resolution Switcher is already running!\nUse the system tray icon." },
+            { "title_already", "Already Running" },
+        };
+
+        private static readonly Dictionary<string, string> Dict = IsChinese ? Dict_ZH : Dict_En;
+
+        // 统一取词：缺失 key 时原样返回，避免空界面
+        private static string T(string key)
+        {
+            string s;
+            return Dict.TryGetValue(key, out s) ? s : key;
+        }
+
+        // 自适应宽度：控件宽度 = 文本测量宽度 + 内边距，中英文自动伸缩
+        private static int ButtonWidth(string text, Font font)
+        {
+            return TextRenderer.MeasureText(text, font).Width + 24;
+        }
+
+        private static int LabelWidth(string text, Font font)
+        {
+            return TextRenderer.MeasureText(text, font).Width + 6;
+        }
+
         // --- Win32 P/Invoke ---
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         private static extern int EnumDisplaySettings(
@@ -123,16 +236,16 @@ namespace AutoGameDetect
             // Tray icon
             _trayIcon = new NotifyIcon();
             _trayIcon.Icon = CreateTrayIcon();
-            _trayIcon.Text = "分辨率自动监控\n正在监控 " + GetEnabledCount() + " 个游戏";
+            _trayIcon.Text = string.Format(T("tray_text"), T("status_running"), GetEnabledCount());
             _trayIcon.Visible = true;
 
             var menu = new ContextMenuStrip();
-            menu.Items.Add("设置监控游戏", null, (s, e) => ShowConfig());
-            menu.Items.Add("暂停监控", null, (s, e) => TogglePause());
+            menu.Items.Add(T("menu_settings"), null, (s, e) => ShowConfig());
+            menu.Items.Add(T("menu_pause"), null, (s, e) => TogglePause());
             menu.Items[1].Name = "menuPause";
-            menu.Items.Add("立即恢复 4K", null, (s, e) => RestoreResolution());
+            menu.Items.Add(T("menu_restore"), null, (s, e) => RestoreResolution());
             menu.Items.Add("-");
-            menu.Items.Add("退出", null, (s, e) => Quit());
+            menu.Items.Add(T("menu_quit"), null, (s, e) => Quit());
             _trayIcon.ContextMenuStrip = menu;
             _trayIcon.DoubleClick += (s, e) => ShowConfig();
 
@@ -167,22 +280,29 @@ namespace AutoGameDetect
             }
 
             _configForm = new Form();
-            _configForm.Text = "分辨率自动监控 - 设置";
+            _configForm.Text = T("win_title");
             _configForm.FormBorderStyle = FormBorderStyle.FixedDialog;
             _configForm.StartPosition = FormStartPosition.CenterScreen;
             _configForm.MaximizeBox = false;
-            _configForm.Font = new Font("微软雅黑", 9);
-            _configForm.ClientSize = new Size(520, 460);
+            Font uiFont = new Font("微软雅黑", 9);
+            _configForm.Font = uiFont;
+            _configForm.ClientSize = new Size(560, 460);
             _configForm.ShowInTaskbar = true;
 
+            // 布局常量：控件宽度由文本测量结果计算，自适应中/英文
+            const int M = 12;                 // 左右边距
+            const int CTRL_GAP = 8;           // 控件间距
+            const int NUD_WIDTH = 72;         // 数字输入框（纯数字，与语言无关）
+            int CW = _configForm.ClientSize.Width;
             int y = 12;
 
             // Info
             var lblInfo = new Label
             {
-                Text = "选择需要自动切换到 2K 的游戏：",
-                Location = new Point(12, y),
-                Size = new Size(480, 20),
+                Text = T("lbl_info"),
+                Location = new Point(M, y),
+                Size = new Size(LabelWidth(T("lbl_info"), uiFont), 20),
+                Font = uiFont,
             };
             _configForm.Controls.Add(lblInfo);
             y += 26;
@@ -190,9 +310,10 @@ namespace AutoGameDetect
             // Scan button
             _btnScan = new Button
             {
-                Text = "🔄 扫描已安装游戏",
-                Location = new Point(12, y),
-                Size = new Size(140, 28),
+                Text = T("btn_scan"),
+                Location = new Point(M, y),
+                Size = new Size(ButtonWidth(T("btn_scan"), uiFont), 28),
+                Font = uiFont,
             };
             _btnScan.Click += (s, e) => ScanAndPopulate();
             _configForm.Controls.Add(_btnScan);
@@ -201,8 +322,8 @@ namespace AutoGameDetect
             // Checked list
             _chkList = new CheckedListBox
             {
-                Location = new Point(12, y),
-                Size = new Size(496, 200),
+                Location = new Point(M, y),
+                Size = new Size(CW - 2 * M, 200),
                 CheckOnClick = true,
                 Font = new Font("Consolas", 9),
             };
@@ -212,57 +333,95 @@ namespace AutoGameDetect
             // Game resolution target
             var lblTarget = new Label
             {
-                Text = "目标分辨率:",
-                Location = new Point(12, y),
-                Size = new Size(90, 24),
+                Text = T("lbl_target"),
+                Location = new Point(M, y),
+                Size = new Size(LabelWidth(T("lbl_target"), uiFont), 24),
+                Font = uiFont,
             };
             _configForm.Controls.Add(lblTarget);
 
+            int x = M + LabelWidth(T("lbl_target"), uiFont) + CTRL_GAP;
             _numWidth = new NumericUpDown
             {
-                Location = new Point(102, y),
-                Width = 70,
+                Location = new Point(x, y),
+                Width = NUD_WIDTH,
                 Minimum = 640,
                 Maximum = 7680,
                 Value = 2560,
+                Font = uiFont,
             };
             _configForm.Controls.Add(_numWidth);
 
-            var lblX = new Label { Text = "×", Location = new Point(176, y), Size = new Size(20, 24) };
+            var lblX = new Label
+            {
+                Text = "×",
+                Location = new Point(x + NUD_WIDTH + 2, y),
+                Size = new Size(LabelWidth("×", uiFont), 24),
+                Font = uiFont,
+            };
             _configForm.Controls.Add(lblX);
 
             _numHeight = new NumericUpDown
             {
-                Location = new Point(196, y),
-                Width = 70,
+                Location = new Point(x + NUD_WIDTH + 2 + LabelWidth("×", uiFont) + 2, y),
+                Width = NUD_WIDTH,
                 Minimum = 480,
                 Maximum = 4320,
                 Value = 1440,
+                Font = uiFont,
             };
             _configForm.Controls.Add(_numHeight);
 
             // Current res display
+            string curText = string.Format(T("lbl_current"),
+                _originalMode.dmPelsWidth, _originalMode.dmPelsHeight);
             var lblCur = new Label
             {
-                Text = "当前: " + _originalMode.dmPelsWidth + "×" + _originalMode.dmPelsHeight,
-                Location = new Point(290, y + 2),
-                Size = new Size(200, 20),
+                Text = curText,
+                Location = new Point(x + NUD_WIDTH + 2 + LabelWidth("×", uiFont) + 2 + NUD_WIDTH + CTRL_GAP, y + 2),
+                Size = new Size(LabelWidth(curText, uiFont), 20),
                 ForeColor = Color.Gray,
+                Font = uiFont,
             };
             _configForm.Controls.Add(lblCur);
             y += 32;
 
             // Add manual game
-            var lblProc = new Label { Text = "进程名(不含.exe):", Location = new Point(12, y), Size = new Size(120, 24) };
+            var lblProc = new Label
+            {
+                Text = T("lbl_proc"),
+                Location = new Point(M, y),
+                Size = new Size(LabelWidth(T("lbl_proc"), uiFont), 24),
+                Font = uiFont,
+            };
             _configForm.Controls.Add(lblProc);
-            TextBox txtProc = new TextBox { Location = new Point(132, y), Width = 160 };
-            _configForm.Controls.Add(txtProc);
+
             _btnAddManual = new Button
             {
-                Text = "添加手动",
-                Location = new Point(298, y),
-                Size = new Size(80, 26),
+                Text = T("btn_add"),
+                Size = new Size(ButtonWidth(T("btn_add"), uiFont), 26),
+                Font = uiFont,
             };
+            Button btnDel = new Button
+            {
+                Text = T("btn_del"),
+                Size = new Size(ButtonWidth(T("btn_del"), uiFont), 26),
+                ForeColor = Color.Red,
+                Font = uiFont,
+            };
+
+            // 右对齐：删除按钮 → 添加按钮 → 输入框（宽度随语言自适应）
+            btnDel.Location = new Point(CW - M - btnDel.Width, y);
+            _btnAddManual.Location = new Point(btnDel.Left - CTRL_GAP - _btnAddManual.Width, y);
+            int procX = M + LabelWidth(T("lbl_proc"), uiFont) + CTRL_GAP;
+            TextBox txtProc = new TextBox
+            {
+                Location = new Point(procX, y),
+                Width = _btnAddManual.Left - CTRL_GAP - procX,
+                Font = uiFont,
+            };
+            _configForm.Controls.Add(txtProc);
+
             _btnAddManual.Click += (s, e) =>
             {
                 string name = txtProc.Text.Trim();
@@ -274,13 +433,13 @@ namespace AutoGameDetect
                     {
                         if (g.ProcessName.Equals(name, StringComparison.OrdinalIgnoreCase))
                         {
-                            MessageBox.Show("该游戏已在列表中。", "提示");
+                            MessageBox.Show(T("msg_already"), T("title_hint"));
                             return;
                         }
                     }
                     _games.Add(new MonitoredGame
                     {
-                        DisplayName = name + " (手动)",
+                        DisplayName = name + T("manual_suffix"),
                         ProcessName = name,
                         TargetWidth = (int)_numWidth.Value,
                         TargetHeight = (int)_numHeight.Value,
@@ -295,13 +454,6 @@ namespace AutoGameDetect
             _configForm.Controls.Add(_btnAddManual);
 
             // Delete selected
-            Button btnDel = new Button
-            {
-                Text = "删除选中",
-                Location = new Point(384, y),
-                Size = new Size(80, 26),
-                ForeColor = Color.Red,
-            };
             btnDel.Click += (s, e) =>
             {
                 for (int i = _chkList.CheckedIndices.Count - 1; i >= 0; i--)
@@ -318,21 +470,36 @@ namespace AutoGameDetect
             y += 34;
 
             // Steam path (optional) - 支持非默认安装路径 / 绿色版 Steam
-            var lblSteam = new Label { Text = "Steam 路径(可选):", Location = new Point(12, y), Size = new Size(110, 24) };
+            var lblSteam = new Label
+            {
+                Text = T("lbl_steam"),
+                Location = new Point(M, y),
+                Size = new Size(LabelWidth(T("lbl_steam"), uiFont), 24),
+                Font = uiFont,
+            };
             _configForm.Controls.Add(lblSteam);
-            _txtSteamPath = new TextBox { Location = new Point(122, y), Width = 240, Text = _manualSteamPath };
-            _configForm.Controls.Add(_txtSteamPath);
+
             Button btnBrowse = new Button
             {
-                Text = "浏览...",
-                Location = new Point(368, y),
-                Size = new Size(70, 26),
+                Text = T("btn_browse"),
+                Size = new Size(ButtonWidth(T("btn_browse"), uiFont), 26),
+                Font = uiFont,
             };
+            btnBrowse.Location = new Point(CW - M - btnBrowse.Width, y);
+            int steamX = M + LabelWidth(T("lbl_steam"), uiFont) + CTRL_GAP;
+            _txtSteamPath = new TextBox
+            {
+                Location = new Point(steamX, y),
+                Width = btnBrowse.Left - CTRL_GAP - steamX,
+                Text = _manualSteamPath,
+                Font = uiFont,
+            };
+            _configForm.Controls.Add(_txtSteamPath);
             btnBrowse.Click += (s, e) =>
             {
                 using (FolderBrowserDialog dlg = new FolderBrowserDialog())
                 {
-                    dlg.Description = "选择 Steam 安装目录（含 steam.exe 的文件夹）";
+                    dlg.Description = T("dlg_steam_desc");
                     dlg.ShowNewFolderButton = false;
                     if (dlg.ShowDialog() == DialogResult.OK)
                         _txtSteamPath.Text = dlg.SelectedPath;
@@ -341,9 +508,9 @@ namespace AutoGameDetect
             _configForm.Controls.Add(btnBrowse);
             var lblSteamHint = new Label
             {
-                Text = "留空 = 自动检测（默认路径 / 注册表，支持任意安装位置）",
-                Location = new Point(12, y + 26),
-                Size = new Size(480, 16),
+                Text = T("lbl_steam_hint"),
+                Location = new Point(M, y + 26),
+                Size = new Size(LabelWidth(T("lbl_steam_hint"), uiFont), 16),
                 ForeColor = Color.Gray,
                 Font = new Font("微软雅黑", 8),
             };
@@ -351,21 +518,25 @@ namespace AutoGameDetect
             y += 50;
 
             // Status & close
+            Button btnClose = new Button
+            {
+                Text = T("btn_close"),
+                Size = new Size(ButtonWidth(T("btn_close"), uiFont), 28),
+                Font = uiFont,
+            };
+            btnClose.Location = new Point(CW - M - btnClose.Width, y - 4);
+
             _lblStatus = new Label
             {
-                Text = "状态: " + (_paused ? "⏸ 已暂停" : "▶ 运行中") + "  |  监控 " + GetEnabledCount() + " 个游戏",
-                Location = new Point(12, y),
-                Size = new Size(350, 20),
+                Text = string.Format(T("status_fmt"),
+                    _paused ? T("status_paused") : T("status_running"), GetEnabledCount()),
+                Location = new Point(M, y),
+                Size = new Size(btnClose.Left - M - CTRL_GAP, 20),
                 ForeColor = Color.Gray,
+                Font = uiFont,
             };
             _configForm.Controls.Add(_lblStatus);
 
-            Button btnClose = new Button
-            {
-                Text = "关闭",
-                Location = new Point(400, y - 4),
-                Size = new Size(80, 28),
-            };
             btnClose.Click += (s, e) =>
             {
                 // Save checked state from UI
@@ -404,7 +575,7 @@ namespace AutoGameDetect
         private void ScanAndPopulate()
         {
             _btnScan.Enabled = false;
-            _btnScan.Text = "扫描中...";
+            _btnScan.Text = T("btn_scanning");
             Application.DoEvents();
 
             int added = 0;
@@ -457,14 +628,14 @@ namespace AutoGameDetect
             UpdateTrayText();
 
             _btnScan.Enabled = true;
-            _btnScan.Text = "🔄 扫描已安装游戏";
+            _btnScan.Text = T("btn_scan");
 
-            string msg = "扫描完成";
-            if (added > 0) msg += "，新增 " + added + " 个游戏";
-            if (removed > 0) msg += "，移除 " + removed + " 个已卸载的游戏";
-            if (added == 0 && removed == 0) msg += "，列表已是最新";
-            msg += "。\n请勾选要自动监控的游戏。";
-            MessageBox.Show(msg, "扫描完成");
+            string msg = T("scan_done");
+            if (added > 0) msg += string.Format(T("scan_added"), added);
+            if (removed > 0) msg += string.Format(T("scan_removed"), removed);
+            if (added == 0 && removed == 0) msg += T("scan_fresh");
+            msg += T("scan_prompt");
+            MessageBox.Show(msg, T("title_scan_done"));
         }
 
         // ================================================================
@@ -641,7 +812,8 @@ namespace AutoGameDetect
                     _currentGameProcess = foundProc;
                     _isInGameMode = true;
                     SwitchResolution(foundWidth, foundHeight);
-                    ShowBalloon("游戏检测", "检测到 " + foundProc + " 已启动，已切换到 " + foundWidth + "×" + foundHeight);
+                    ShowBalloon(T("balloon_start_title"),
+                        string.Format(T("balloon_start"), foundProc, foundWidth, foundHeight));
                 }
                 else if (!foundGame && _isInGameMode)
                 {
@@ -649,7 +821,8 @@ namespace AutoGameDetect
                     _isInGameMode = false;
                     _currentGameProcess = "";
                     RestoreResolution();
-                    ShowBalloon("游戏退出", "已恢复原始分辨率 " + _originalMode.dmPelsWidth + "×" + _originalMode.dmPelsHeight);
+                    ShowBalloon(T("balloon_exit_title"),
+                        string.Format(T("balloon_exit"), _originalMode.dmPelsWidth, _originalMode.dmPelsHeight));
                 }
             }
             catch { }
@@ -696,7 +869,7 @@ namespace AutoGameDetect
         {
             _paused = !_paused;
             var menu = _trayIcon.ContextMenuStrip;
-            menu.Items[1].Text = _paused ? "▶ 恢复监控" : "⏸ 暂停监控";
+            menu.Items[1].Text = _paused ? T("menu_resume") : T("menu_pause");
 
             if (_paused && _isInGameMode)
             {
@@ -710,10 +883,10 @@ namespace AutoGameDetect
 
         private void UpdateTrayText()
         {
-            string status = _paused ? "⏸ 已暂停" : "▶ 运行中";
-            _trayIcon.Text = "分辨率自动监控\n" + status + " | 监控 " + GetEnabledCount() + " 个游戏";
+            string status = _paused ? T("status_paused") : T("status_running");
+            _trayIcon.Text = string.Format(T("tray_text"), status, GetEnabledCount());
             if (_lblStatus != null && !_lblStatus.IsDisposed)
-                _lblStatus.Text = "状态: " + status + "  |  监控 " + GetEnabledCount() + " 个游戏";
+                _lblStatus.Text = string.Format(T("status_fmt"), status, GetEnabledCount());
         }
 
         // ================================================================
@@ -848,7 +1021,7 @@ namespace AutoGameDetect
             {
                 if (!createdNew)
                 {
-                    MessageBox.Show("分辨率自动监控已在运行！\n请在系统托盘图标上操作。", "已在运行");
+                    MessageBox.Show(T("main_already"), T("title_already"));
                     return;
                 }
                 Application.EnableVisualStyles();

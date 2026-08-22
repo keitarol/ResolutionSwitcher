@@ -1,0 +1,10 @@
+# 编译产物
+*.exe
+*.dll
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo

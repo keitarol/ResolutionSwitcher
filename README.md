@@ -23,6 +23,13 @@ Windows 托盘工具：玩 3A 游戏时自动把分辨率从 4K 切换到 2K (25
 
 ## 🚀 使用方法
 
+### 📥 下载
+
+1. 从 [Releases 页面](https://github.com/keitarol/ResolutionSwitcher/releases/latest) 下载最新版本
+2. 下载 `AutoGameDetect.exe`（免安装，双击即用）
+
+### 🎮 使用
+
 1. 运行 `AutoGameDetect.exe`
 2. 首次运行自动弹出设置窗口，点「🔄 扫描已安装游戏」
 3. 勾选要监控的 3A 游戏（比如 GTA V、古墓丽影）

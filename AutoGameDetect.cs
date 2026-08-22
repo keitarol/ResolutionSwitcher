@@ -85,6 +85,7 @@ namespace AutoGameDetect
         private DEVMODE _originalMode;
         private List<MonitoredGame> _games = new List<MonitoredGame>();
         private string _configPath;
+        private string _manualSteamPath = "";   // 手动指定的 Steam 安装路径（留空=自动检测）
         private NotifyIcon _trayIcon;
         private System.Threading.Timer _pollTimer;
         private bool _isInGameMode = false;
@@ -98,6 +99,7 @@ namespace AutoGameDetect
         private NumericUpDown _numHeight;
         private Button _btnAddManual;
         private Button _btnScan;
+        private TextBox _txtSteamPath;
         private Label _lblStatus;
 
         public AppContext()
@@ -305,6 +307,39 @@ namespace AutoGameDetect
             _configForm.Controls.Add(btnDel);
             y += 34;
 
+            // Steam path (optional) - 支持非默认安装路径 / 绿色版 Steam
+            var lblSteam = new Label { Text = "Steam 路径(可选):", Location = new Point(12, y), Size = new Size(110, 24) };
+            _configForm.Controls.Add(lblSteam);
+            _txtSteamPath = new TextBox { Location = new Point(122, y), Width = 240, Text = _manualSteamPath };
+            _configForm.Controls.Add(_txtSteamPath);
+            Button btnBrowse = new Button
+            {
+                Text = "浏览...",
+                Location = new Point(368, y),
+                Size = new Size(70, 26),
+            };
+            btnBrowse.Click += (s, e) =>
+            {
+                using (FolderBrowserDialog dlg = new FolderBrowserDialog())
+                {
+                    dlg.Description = "选择 Steam 安装目录（含 steam.exe 的文件夹）";
+                    dlg.ShowNewFolderButton = false;
+                    if (dlg.ShowDialog() == DialogResult.OK)
+                        _txtSteamPath.Text = dlg.SelectedPath;
+                }
+            };
+            _configForm.Controls.Add(btnBrowse);
+            var lblSteamHint = new Label
+            {
+                Text = "留空 = 自动检测（默认路径 / 注册表，支持任意安装位置）",
+                Location = new Point(12, y + 26),
+                Size = new Size(480, 16),
+                ForeColor = Color.Gray,
+                Font = new Font("微软雅黑", 8),
+            };
+            _configForm.Controls.Add(lblSteamHint);
+            y += 50;
+
             // Status & close
             _lblStatus = new Label
             {
@@ -326,6 +361,7 @@ namespace AutoGameDetect
                 // Save checked state from UI
                 for (int i = 0; i < _games.Count && i < _chkList.Items.Count; i++)
                     _games[i].Enabled = _chkList.GetItemChecked(i);
+                _manualSteamPath = _txtSteamPath.Text.Trim();
                 SaveConfig();
                 UpdateTrayText();
                 _configForm.Close();
@@ -537,8 +573,12 @@ namespace AutoGameDetect
 
         private string FindSteamPath()
         {
+            // 1. 用户手动指定的路径优先（绿色版/便携版 Steam）
+            if (_manualSteamPath.Length > 0 && Directory.Exists(_manualSteamPath)) return _manualSteamPath;
+            // 2. 默认安装路径
             string def = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Steam");
             if (Directory.Exists(def)) return def;
+            // 3. 注册表 InstallPath（Steam 装在任何位置都会写入，非默认安装也能找到）
             try
             {
                 using (var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\WOW6432Node\Valve\Steam"))
@@ -679,6 +719,11 @@ namespace AutoGameDetect
                 {
                     string trimmed = line.Trim();
                     if (trimmed.Length == 0 || trimmed.StartsWith("#")) continue;
+                    if (trimmed.StartsWith("STEAMPATH="))
+                    {
+                        _manualSteamPath = trimmed.Substring("STEAMPATH=".Length).Trim();
+                        continue;
+                    }
                     string[] parts = trimmed.Split('|');
                     if (parts.Length >= 5)
                     {
@@ -707,6 +752,8 @@ namespace AutoGameDetect
                 {
                     w.WriteLine("# 分辨率自动监控 - 游戏列表");
                     w.WriteLine("# 格式: 显示名|进程名|目标宽|目标高|启用(1/0)");
+                    w.WriteLine("# Steam 安装路径（可选，留空自动检测）");
+                    w.WriteLine("STEAMPATH=" + _manualSteamPath);
                     foreach (var g in _games)
                     {
                         w.WriteLine(g.DisplayName + "|" + g.ProcessName + "|"

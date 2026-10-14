@@ -71,6 +71,8 @@ namespace AutoGameDetect
             { "manual_suffix", " (手动)" },
             { "main_already", "分辨率自动监控已在运行！\n请在系统托盘图标上操作。" },
             { "title_already", "已在运行" },
+            { "capture_failed_title", "无法读取当前分辨率" },
+            { "capture_failed", "为保护显示设置，自动切换已暂停。请在桌面分辨率正常后，右键托盘图标选择【恢复监控】重试。" },
         };
 
         // 英文文案
@@ -114,6 +116,8 @@ namespace AutoGameDetect
             { "manual_suffix", " (manual)" },
             { "main_already", "Resolution Switcher is already running!\nUse the system tray icon." },
             { "title_already", "Already Running" },
+            { "capture_failed_title", "Cannot Read Current Resolution" },
+            { "capture_failed", "Auto-switching was paused to protect your display settings. Once the desktop resolution is normal, right-click the tray icon and choose Resume Monitoring to retry." },
         };
 
         private static readonly Dictionary<string, string> Dict = IsChinese ? Dict_ZH : Dict_En;
@@ -189,6 +193,7 @@ namespace AutoGameDetect
         }
 
         private const int ENUM_CURRENT_SETTINGS = -1;
+        private const int ENUM_REGISTRY_SETTINGS = -2;
         private const int CDS_TEST = 0x02;
         private const int CDS_GLOBAL = 0x08;
         private const int CDS_UPDATEREGISTRY = 0x01;
@@ -214,6 +219,9 @@ namespace AutoGameDetect
         private bool _isInGameMode = false;
         private string _currentGameProcess = "";
         private bool _paused = false;
+        private bool _origValid = false;                       // _originalMode 是否为有效模式
+        private DateTime _lastGameExit = DateTime.MinValue;    // 游戏退出时间，用于显示模式守护
+        private string _logPath;
 
         // --- UI components ---
         private Form _configForm;
@@ -230,8 +238,22 @@ namespace AutoGameDetect
             _configPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "ResolutionSwitcher", "monitored_games.txt");
+            _logPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ResolutionSwitcher", "resolution.log");
 
+            // 捕获原始分辨率：必须先校验，绝不让无效（全零）DEVMODE 流入后续的
+            // ChangeDisplaySettingsEx 调用 —— 那会把桌面直接掉到驱动默认低分辨率
             _originalMode = GetCurrentDisplayMode();
+            _origValid = IsValidMode(_originalMode);
+            if (!_origValid)
+            {
+                // 回退：使用注册表中记录的桌面模式
+                DEVMODE reg = GetRegistryDisplayMode();
+                if (IsValidMode(reg)) { _originalMode = reg; _origValid = true; }
+            }
+            Log("startup: original=" + ModeStr(_originalMode) + ", valid=" + _origValid);
+            if (!_origValid) _paused = true;   // 无法确定原始分辨率时暂停监控，避免破坏显示设置
 
             // Tray icon
             _trayIcon = new NotifyIcon();
@@ -249,7 +271,11 @@ namespace AutoGameDetect
             _trayIcon.ContextMenuStrip = menu;
             _trayIcon.DoubleClick += (s, e) => ShowConfig();
 
+            if (!_origValid)
+                ShowBalloon(T("capture_failed_title"), T("capture_failed"));
+
             LoadConfig();
+            UpdateTrayText();
 
             // If no games configured, show config on first run
             if (_games.Count == 0)
@@ -821,8 +847,21 @@ namespace AutoGameDetect
                     _isInGameMode = false;
                     _currentGameProcess = "";
                     RestoreResolution();
+                    _lastGameExit = DateTime.Now;
                     ShowBalloon(T("balloon_exit_title"),
                         string.Format(T("balloon_exit"), _originalMode.dmPelsWidth, _originalMode.dmPelsHeight));
+                }
+                else if (!foundGame && !_isInGameMode && _origValid
+                         && (DateTime.Now - _lastGameExit).TotalSeconds < 15)
+                {
+                    // 显示守护：游戏退出后短时间内，若桌面被降级到比原始分辨率更低的模式，自动再恢复一次
+                    DEVMODE cur = GetCurrentDisplayMode();
+                    if (IsValidMode(cur)
+                        && (cur.dmPelsWidth < _originalMode.dmPelsWidth || cur.dmPelsHeight < _originalMode.dmPelsHeight))
+                    {
+                        Log("guard: desktop degraded to " + ModeStr(cur) + " - restoring again");
+                        RestoreResolution();
+                    }
                 }
             }
             catch { }
@@ -832,6 +871,16 @@ namespace AutoGameDetect
         {
             try
             {
+                // 原始模式必须有效，否则绝不动显示设置
+                if (!_origValid && !RefreshOriginalMode())
+                {
+                    Log("switch: aborted, no valid original mode");
+                    ShowBalloon(T("capture_failed_title"), T("capture_failed"));
+                    return;
+                }
+
+                DEVMODE before = GetCurrentDisplayMode();
+
                 DEVMODE target = _originalMode;
                 target.dmPelsWidth = width;
                 target.dmPelsHeight = height;
@@ -842,21 +891,68 @@ namespace AutoGameDetect
                 if (exact.dmSize != 0) target = exact;
 
                 int r = ChangeDisplaySettingsEx(null, ref target, IntPtr.Zero, CDS_TEST, IntPtr.Zero);
+                Log("switch target: " + ModeStr(target) + ", dmSize=" + target.dmSize
+                    + ", dmFields=0x" + target.dmFields.ToString("X8") + ", dev='" + target.dmDeviceName
+                    + "', test=" + r);
                 if (r == DISP_CHANGE_SUCCESSFUL)
-                    r = ChangeDisplaySettingsEx(null, ref target, IntPtr.Zero,
-                        CDS_GLOBAL | CDS_UPDATEREGISTRY, IntPtr.Zero);
+                    // flags=0 = 临时模式（仅当前会话生效，不写注册表）：
+                    // 避免把游戏分辨率污染成系统默认桌面模式；
+                    // 注意 CDS_GLOBAL 必须与 CDS_UPDATEREGISTRY 联用，单独使用会返回 BADFLAGS
+                    r = ChangeDisplaySettingsEx(null, ref target, IntPtr.Zero, 0, IntPtr.Zero);
+
+                Log("switch " + width + "x" + height + ": " + ModeStr(before) + " -> "
+                    + ModeStr(GetCurrentDisplayMode()) + ", result=" + r);
             }
-            catch { }
+            catch (Exception ex) { Log("switch error: " + ex.Message); }
         }
 
         private void RestoreResolution()
         {
             try
             {
-                ChangeDisplaySettingsEx(null, ref _originalMode, IntPtr.Zero,
-                    CDS_GLOBAL | CDS_UPDATEREGISTRY, IntPtr.Zero);
+                if (!IsValidMode(_originalMode) && !RefreshOriginalMode())
+                {
+                    Log("restore: aborted, no valid original mode");
+                    ShowBalloon(T("capture_failed_title"), T("capture_failed"));
+                    return;
+                }
+
+                DEVMODE cur = GetCurrentDisplayMode();
+                if (IsValidMode(cur)
+                    && cur.dmPelsWidth == _originalMode.dmPelsWidth
+                    && cur.dmPelsHeight == _originalMode.dmPelsHeight
+                    && cur.dmDisplayFrequency == _originalMode.dmDisplayFrequency)
+                {
+                    Log("restore: already at original mode " + ModeStr(cur));
+                    return;
+                }
+
+                // 优先使用当前可枚举到的匹配模式（原刷新率可能暂时不可用）
+                DEVMODE target = FindMatchingMode(_originalMode.dmPelsWidth, _originalMode.dmPelsHeight,
+                    _originalMode.dmBitsPerPel, _originalMode.dmDisplayFrequency);
+                if (target.dmSize == 0) target = _originalMode;
+
+                int r = ChangeDisplaySettingsEx(null, ref target, IntPtr.Zero, CDS_TEST, IntPtr.Zero);
+                if (r == DISP_CHANGE_SUCCESSFUL)
+                    r = ChangeDisplaySettingsEx(null, ref target, IntPtr.Zero,
+                        CDS_GLOBAL | CDS_UPDATEREGISTRY, IntPtr.Zero);
+
+                // 验证结果并重试：显卡/显示器重新协商有时需要一点时间
+                for (int i = 0; i < 3; i++)
+                {
+                    DEVMODE now = GetCurrentDisplayMode();
+                    if (IsValidMode(now)
+                        && now.dmPelsWidth == _originalMode.dmPelsWidth
+                        && now.dmPelsHeight == _originalMode.dmPelsHeight)
+                        break;
+                    System.Threading.Thread.Sleep(300);
+                    ChangeDisplaySettingsEx(null, ref target, IntPtr.Zero,
+                        CDS_GLOBAL | CDS_UPDATEREGISTRY, IntPtr.Zero);
+                }
+
+                Log("restore: result=" + r + " -> " + ModeStr(GetCurrentDisplayMode()));
             }
-            catch { }
+            catch (Exception ex) { Log("restore error: " + ex.Message); }
         }
 
         private void ShowBalloon(string title, string text)
@@ -870,6 +966,10 @@ namespace AutoGameDetect
             _paused = !_paused;
             var menu = _trayIcon.ContextMenuStrip;
             menu.Items[1].Text = _paused ? T("menu_resume") : T("menu_pause");
+
+            // 恢复监控时重新校准原始分辨率（例如启动时枚举失败的场景）
+            if (!_paused && !_origValid)
+                RefreshOriginalMode();
 
             if (_paused && _isInGameMode)
             {
@@ -958,6 +1058,56 @@ namespace AutoGameDetect
             if (EnumDisplaySettings(null, ENUM_CURRENT_SETTINGS, ref mode) != 0)
                 return mode;
             return new DEVMODE();
+        }
+
+        // 无效模式判定：枚举失败时返回全零结构（dmSize=0），
+        // 绝不能把这种结构传给 ChangeDisplaySettingsEx
+        private static bool IsValidMode(DEVMODE m)
+        {
+            return m.dmSize != 0 && m.dmPelsWidth >= 640 && m.dmPelsHeight >= 480;
+        }
+
+        // 注册表中记录的桌面模式（枚举当前模式失败时的可靠回退）
+        private DEVMODE GetRegistryDisplayMode()
+        {
+            DEVMODE mode = new DEVMODE();
+            mode.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+            if (EnumDisplaySettings(null, ENUM_REGISTRY_SETTINGS, ref mode) != 0)
+                return mode;
+            return new DEVMODE();
+        }
+
+        // 仅在原始模式无效时调用：重新校准为当前有效模式，或回退注册表模式
+        private bool RefreshOriginalMode()
+        {
+            DEVMODE cur = GetCurrentDisplayMode();
+            if (IsValidMode(cur)) { _originalMode = cur; _origValid = true; Log("original refreshed from current: " + ModeStr(cur)); return true; }
+            DEVMODE reg = GetRegistryDisplayMode();
+            if (IsValidMode(reg)) { _originalMode = reg; _origValid = true; Log("original refreshed from registry: " + ModeStr(reg)); return true; }
+            return false;
+        }
+
+        private string ModeStr(DEVMODE m)
+        {
+            if (!IsValidMode(m)) return "(invalid)";
+            return m.dmPelsWidth + "x" + m.dmPelsHeight + "@" + m.dmDisplayFrequency + "Hz " + m.dmBitsPerPel + "bpp";
+        }
+
+        // 轻量日志：记录捕获/切换/恢复结果，便于事后诊断显示异常
+        private void Log(string msg)
+        {
+            try
+            {
+                if (_logPath == null) return;
+                string dir = Path.GetDirectoryName(_logPath);
+                if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                if (File.Exists(_logPath) && new FileInfo(_logPath).Length > 256 * 1024)
+                    File.Delete(_logPath);
+                File.AppendAllText(_logPath,
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + msg + Environment.NewLine,
+                    Encoding.UTF8);
+            }
+            catch { }
         }
 
         private DEVMODE FindMatchingMode(int width, int height, int bits, int refresh)

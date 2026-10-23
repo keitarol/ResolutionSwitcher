@@ -31,6 +31,7 @@ namespace AutoGameDetect
                 StringComparison.OrdinalIgnoreCase);
 
         // 中文文案（key 统一，便于对照维护）
+        private const string AppVersion = "1.2.3";
         private static readonly Dictionary<string, string> Dict_ZH = new Dictionary<string, string>
         {
             { "win_title", "分辨率自动监控 - 设置" },
@@ -315,7 +316,7 @@ namespace AutoGameDetect
             }
 
             _configForm = new Form();
-            _configForm.Text = T("win_title");
+            _configForm.Text = T("win_title") + " v" + AppVersion;
             _configForm.FormBorderStyle = FormBorderStyle.FixedDialog;
             _configForm.StartPosition = FormStartPosition.CenterScreen;
             _configForm.MaximizeBox = false;

@@ -8,7 +8,3 @@ obj/
 .vs/
 *.user
 *.suo
-
-# 运行期数据目录 (fallback)
-data/
-

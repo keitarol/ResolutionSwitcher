@@ -19,16 +19,11 @@ Ideal for:
 - 🎮 **Automatic Steam library scanning** — reads `libraryfolders.vdf` and `appmanifest_*.acf`, supports multiple Steam library folders, and detects installed games automatically
 - 📍 **Non-default Steam installs supported** — Steam installed on any drive is detected via the Windows registry; portable/green Steam builds can be added manually in Settings
 - ✅ **Per-game opt-in monitoring** — only the games you check are monitored; everything else (including LOL) runs untouched at 4K
-- 📋 **Multi-column game list** — game / process / target resolution / enabled state at a glance, no misalignment with mixed CJK and Latin text
-- ⚙️ **Independent target resolution per game** — select rows and click "Apply to Selected" to run different titles at 2K, 1080p, etc.
 - 🗑️ **Self-cleaning rescan** — re-scanning removes uninstalled games while preserving manually added entries
-- 🧠 **Persistent restore target** — the desktop mode is stored in the config, so a restart or crash never mistakes the 2K mode you were gaming in for your "original" resolution
-- 🖱️ **System tray operation** — right-click menu: Settings / current resolution / Pause / Restore now / Set current as restore target / Exit
-- 🌍 **Automatic localization** — detects the system UI language at startup: `zh-*` shows Chinese, everything else shows English (all UI text lives in a centralized dictionary), and `--lang` forces a choice
-- 🚀 **Built-in autostart toggle** — one checkbox in Settings, no shortcut juggling
-- 🖥️ **Crisp on 4K displays** — declares DPI awareness, so the UI is not bitmap-stretched and blurry
-- 🩺 **Diagnostic log** — every switch/restore is written to `resolution.log` for one-glance troubleshooting
-
+- 🖱️ **System tray operation** — right-click menu: Settings / Pause Monitoring / Restore 4K Now / Exit
+- 🌍 **Automatic localization** — detects the system UI language at startup: `zh-*` shows Chinese, everything else shows English (all UI text lives in a centralized dictionary)
+- 🚀 **Auto-start support** — place a shortcut in `shell:startup` to launch on boot
+- ⚙️ **Custom target resolution** — defaults to 2560×1440, adjustable in Settings
 
 ## 🚀 Getting Started
 
@@ -51,43 +46,17 @@ Ideal for:
 
 | Menu Item | Action |
 |-----------|--------|
-| Settings... | Open the game monitoring configuration window |
-| Desktop: W×H@Hz | Read-only, shows the current display mode |
+| Settings | Open the game monitoring configuration window |
 | Pause Monitoring / Resume | Temporarily disable or re-enable auto-switching |
-| Restore Desktop Resolution | Immediately restore the target desktop resolution |
-| Set Current as Restore Target | Use the current display mode as the restore target |
+| Restore 4K Now | Immediately restore the original resolution |
 | Exit | Quit the program |
 
 ## ⚙️ Configuration
 
 | Item | Location |
 |------|----------|
-| Monitored games + restore target | `%LOCALAPPDATA%\ResolutionSwitcher\monitored_games.txt` (falls back to a `data\` folder next to the exe when security software blocks writes; the old config is migrated automatically) |
-| Diagnostic log | `%LOCALAPPDATA%\ResolutionSwitcher\resolution.log` (rotated to `.old` at 512 KB) |
-| Autostart | Registry `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (toggle in Settings) |
-
-Config writes are atomic (temp file + replace), and loading is per-line fault tolerant: one corrupted line never hides the rest of your games.
-
-## 🧰 Command Line
-
-| Argument / variable | Effect |
-|------|------|
-| `--lang zh` / `--lang en` | Force the UI language (handy to preview English on a Chinese system) |
-| `AGD_LANG=en` | Same, as an environment variable |
-| `AGD_DATA_DIR=D:\MyTools\RS` | Portable mode: keep config and log in the given folder instead of `%LOCALAPPDATA%` |
-
-```bat
-:: Example: forced English UI in portable mode
-set AGD_LANG=en
-set AGD_DATA_DIR=%~dp0data
-AutoGameDetect.exe
-```
-
-## ⚠️ Known Limitations
-
-- Only the **primary display** is switched (multi-monitor setups where the game runs on a secondary screen will not behave as expected)
-- The game must run in **exclusive fullscreen**; borderless-windowed games ignore desktop resolution changes
-- When the Windows session is locked or running over Remote Desktop, the OS refuses display-mode changes (the log records `DISP_CHANGE_FAILED`)
+| Monitored games list | `%LOCALAPPDATA%\ResolutionSwitcher\monitored_games.txt` |
+| Auto-start | Shortcut in `shell:startup` |
 
 ## 🌍 Localization
 
@@ -110,36 +79,11 @@ Or open the source in Visual Studio and build.
 
 ## 🧠 How It Works
 
-- Polls running processes every 3 seconds — one enumeration per tick, compared against a set, rather than one scan per game — matching monitored games by process name (without `.exe`)
-- On game start → enumerates the display's available modes, picks the best match for the target resolution/refresh rate, validates it with `CDS_TEST`, then applies it as a temporary mode (nothing is written to the registry)
-- On game exit → restores the desktop mode stored in the config, verifying the return value and retrying; a short guard window keeps re-restoring if the desktop gets downgraded
-- Game names are parsed from Steam `appmanifest_*.acf` files; process names are auto-matched to the primary executable in the install directory (name similarity first, then largest binary)
-- **Steam path lookup order**: manually specified path → default install path → registry `InstallPath` / `SteamPath` (covers non-default installations)
-- Polling runs on a WinForms timer, i.e. on the UI thread, so the game list has no cross-thread races; tray menu and balloon notifications are raised on the UI thread too
-
-## 📝 Changelog
-
-### v1.3.1
-
-- Added: **run the exe again to open the settings window** — when Windows hides the tray icon in the overflow area, launching the program a second time brings the settings window up (instead of showing "already running")
-- Added: **automatic config-folder fallback** — if `%LOCALAPPDATA%` writes are blocked by security software (e.g. Tencent PC Manager), the app switches to a `data\` folder next to the exe, tells you where it landed, and migrates your existing config
-- Fixed: silent write failures made it look like "settings are never saved", with no hint at all
-
-> To move the config back to `%LOCALAPPDATA%`, add `AutoGameDetect.exe` to your security software's trusted/allow list.
-
-### v1.3.0
-
-- Fixed: starting the app while the desktop was already at 2K made 2K the "original" resolution (restore target is now persisted in the config)
-- Fixed: applying an enumerated `DEVMODE` without declaring `dmFields` made `ChangeDisplaySettingsEx` fail with `DISP_CHANGE_FAILED`
-- Fixed: a failed switch still reported "switched" (failures are now reported as failures)
-- Fixed: blurry UI on 4K displays caused by Windows bitmap-stretching a DPI-unaware window
-- Fixed: GDI handle leaks (tray icon handle, fonts, form not disposed)
-- Fixed: a single corrupted config line used to hide every game after it (now per-line fault tolerant)
-- Improved: multi-column ListView, multi-select, independent per-game target resolution
-- Improved: built-in autostart toggle (registry Run key, cleans up the legacy `shell:startup` shortcut)
-- Improved: single-pass process enumeration; restore/switch now validate, retry, and guard the desktop mode
-- Added: `--lang` override, `AGD_DATA_DIR` portable mode, log rotation, global exception logging
-
+- Polls running processes every 3 seconds, matching monitored games by process name (without `.exe`)
+- On game start → calls `ChangeDisplaySettingsEx` to switch to the target resolution
+- On game exit → restores the original resolution captured at program startup
+- Game names are parsed from Steam `appmanifest_*.acf` files; process names are auto-matched to the primary executable in the install directory
+- **Steam path lookup order**: manually specified path → default install path → registry `InstallPath` (covers non-default installations)
 
 ## 📄 License
 

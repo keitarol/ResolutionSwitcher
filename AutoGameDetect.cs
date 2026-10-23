@@ -222,6 +222,10 @@ namespace AutoGameDetect
         private bool _origValid = false;                       // _originalMode 是否为有效模式
         private DateTime _lastGameExit = DateTime.MinValue;    // 游戏退出时间，用于显示模式守护
         private string _logPath;
+        private SynchronizationContext _ui;                        // UI 线程上下文，用于跨线程唤起设置窗口
+        private EventWaitHandle _showEvent;                        // 第二实例发信号 → 唤起设置窗口
+        private Bitmap _trayBmp;                                   // 托盘图标位图：保持引用防止 GC 回收导致图标消失
+        private bool _autostart = false;                           // 开机自启时不弹设置窗口
 
         // --- UI components ---
         private Form _configForm;
@@ -233,8 +237,10 @@ namespace AutoGameDetect
         private TextBox _txtSteamPath;
         private Label _lblStatus;
 
-        public AppContext()
+        public AppContext(bool autostart)
         {
+            _autostart = autostart;
+            _ui = SynchronizationContext.Current;
             _configPath = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "ResolutionSwitcher", "monitored_games.txt");
@@ -254,6 +260,9 @@ namespace AutoGameDetect
             }
             Log("startup: original=" + ModeStr(_originalMode) + ", valid=" + _origValid);
             if (!_origValid) _paused = true;   // 无法确定原始分辨率时暂停监控，避免破坏显示设置
+
+            // 第二实例唤起窗口的事件（必须先于任何第二实例创建）
+            _showEvent = new EventWaitHandle(false, EventResetMode.AutoReset, "ResolutionAutoDetectShowEvent");
 
             // Tray icon
             _trayIcon = new NotifyIcon();
@@ -277,8 +286,8 @@ namespace AutoGameDetect
             LoadConfig();
             UpdateTrayText();
 
-            // If no games configured, show config on first run
-            if (_games.Count == 0)
+            // 无游戏时首次运行弹窗；手动双击启动时也总是弹窗（开机自启除外）
+            if (_games.Count == 0 || !_autostart)
             {
                 ShowConfig();
             }
@@ -806,6 +815,20 @@ namespace AutoGameDetect
         // ================================================================
         private void CheckGames(object state)
         {
+            try
+            {
+                // 自愈：开机自启时任务栏可能尚未就绪导致托盘图标丢失，定期重挂
+                if (_trayIcon != null && !_trayIcon.Visible)
+                    _trayIcon.Visible = true;
+
+                // 第二实例双击 → 唤起本实例的设置窗口（切回 UI 线程执行）
+                if (_showEvent != null && _showEvent.WaitOne(0))
+                {
+                    if (_ui != null) _ui.Post(delegate { ShowConfig(); }, null);
+                }
+            }
+            catch { }
+
             if (_paused) return;
 
             try
@@ -1150,6 +1173,7 @@ namespace AutoGameDetect
                 }
             }
             IntPtr hIcon = bmp.GetHicon();
+            _trayBmp = bmp;   // 保活：Bitmap 被 GC 回收会销毁 HICON，托盘图标随之消失
             return Icon.FromHandle(hIcon);
         }
 
@@ -1163,20 +1187,35 @@ namespace AutoGameDetect
         }
 
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
+            bool autostart = false;
+            foreach (string a in args)
+            {
+                if (a != null && a.Trim().Equals("--autostart", StringComparison.OrdinalIgnoreCase))
+                { autostart = true; break; }
+            }
+
             // Ensure single instance
             bool createdNew;
             using (Mutex mutex = new Mutex(true, "ResolutionAutoDetect", out createdNew))
             {
                 if (!createdNew)
                 {
-                    MessageBox.Show(T("main_already"), T("title_already"));
+                    // 已有实例在运行：发信号唤起其设置窗口，然后退出
+                    try
+                    {
+                        EventWaitHandle ev = EventWaitHandle.OpenExisting("ResolutionAutoDetectShowEvent");
+                        ev.Set();
+                        ev.Dispose();
+                    }
+                    catch { }
                     return;
                 }
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new AppContext());
+                SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
+                Application.Run(new AppContext(autostart));
             }
         }
     }

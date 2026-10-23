@@ -62,7 +62,7 @@ Ideal for:
 
 | Item | Location |
 |------|----------|
-| Monitored games + restore target | `%LOCALAPPDATA%\ResolutionSwitcher\monitored_games.txt` |
+| Monitored games + restore target | `%LOCALAPPDATA%\ResolutionSwitcher\monitored_games.txt` (falls back to a `data\` folder next to the exe when security software blocks writes; the old config is migrated automatically) |
 | Diagnostic log | `%LOCALAPPDATA%\ResolutionSwitcher\resolution.log` (rotated to `.old` at 512 KB) |
 | Autostart | Registry `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (toggle in Settings) |
 
@@ -118,6 +118,14 @@ Or open the source in Visual Studio and build.
 - Polling runs on a WinForms timer, i.e. on the UI thread, so the game list has no cross-thread races; tray menu and balloon notifications are raised on the UI thread too
 
 ## 📝 Changelog
+
+### v1.3.1
+
+- Added: **run the exe again to open the settings window** — when Windows hides the tray icon in the overflow area, launching the program a second time brings the settings window up (instead of showing "already running")
+- Added: **automatic config-folder fallback** — if `%LOCALAPPDATA%` writes are blocked by security software (e.g. Tencent PC Manager), the app switches to a `data\` folder next to the exe, tells you where it landed, and migrates your existing config
+- Fixed: silent write failures made it look like "settings are never saved", with no hint at all
+
+> To move the config back to `%LOCALAPPDATA%`, add `AutoGameDetect.exe` to your security software's trusted/allow list.
 
 ### v1.3.0
 

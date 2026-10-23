@@ -1,4 +1,4 @@
-// AutoGameDetect — 4K 显示器自动分辨率切换工具
+﻿// AutoGameDetect — 4K 显示器自动分辨率切换工具
 // Copyright (c) 2025 keitarol
 //
 // Licensed under the MIT License.
@@ -26,14 +26,14 @@ using Microsoft.Win32;
 [assembly: AssemblyDescription("Auto resolution switcher: 4K desktop, 2K while gaming")]
 [assembly: AssemblyCompany("keitarol")]
 [assembly: AssemblyCopyright("Copyright (c) 2025 keitarol")]
-[assembly: AssemblyVersion("1.3.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.0")]
+[assembly: AssemblyVersion("1.3.1.0")]
+[assembly: AssemblyFileVersion("1.3.1.0")]
 
 namespace AutoGameDetect
 {
     public class AppContext : ApplicationContext
     {
-        private const string AppVersion = "1.3.0";
+        private const string AppVersion = "1.3.1";
 
         // ================================================================
         //  Localization
@@ -136,6 +136,8 @@ namespace AutoGameDetect
             { "autostart_on", "已开启开机自动启动。" },
             { "autostart_off", "已关闭开机自动启动。" },
             { "autostart_fail", "无法修改开机自启设置：{0}" },
+            { "data_dir_title", "配置目录不可写" },
+            { "data_dir_fallback", "系统拒绝写入默认配置目录（通常是安全软件拦截）。\n已自动改用：{0}\n设置仍可正常保存。" },
         };
 
         // 英文文案
@@ -201,6 +203,8 @@ namespace AutoGameDetect
             { "autostart_on", "Start with Windows enabled." },
             { "autostart_off", "Start with Windows disabled." },
             { "autostart_fail", "Cannot change the startup setting: {0}" },
+            { "data_dir_title", "Config Folder Not Writable" },
+            { "data_dir_fallback", "The default config folder is blocked (usually by security software).\nUsing instead: {0}\nSettings will still be saved." },
         };
 
         private static readonly Dictionary<string, string> Dict = IsChinese ? Dict_ZH : Dict_En;
@@ -319,6 +323,9 @@ namespace AutoGameDetect
         private ContextMenuStrip _menu;
         private ToolStripMenuItem _menuPause, _menuRestore, _menuSetTarget, _menuCurrent;
         private System.Windows.Forms.Timer _pollTimer;
+        private System.Windows.Forms.Timer _activateTimer;
+        private static volatile bool _activateRequested = false;   // 另一实例请求唤起设置窗口
+        private const string ActivateEventName = "ResolutionAutoDetect.ShowSettings";
         private bool _isInGameMode = false;
         private string _currentGameName = "";
         private bool _paused = false;
@@ -343,13 +350,15 @@ namespace AutoGameDetect
         // ================================================================
         public AppContext()
         {
-            string dir = DefaultDataDir();
+            string dir = ResolveDataDir();
             _configPath = Path.Combine(dir, "monitored_games.txt");
             _logPath = Path.Combine(dir, "resolution.log");
 
-            Log("=== start v" + AppVersion + " lang=" + Lang + " ===");
+            Log("=== start v" + AppVersion + " lang=" + Lang + " data=" + dir
+                + (_dataDirFallback ? " (fallback)" : "") + " ===");
 
             // 配置先读：里面可能保存了用户期望的桌面模式（重启/上次异常退出后）
+            if (_dataDirFallback) MigrateLegacyConfig(dir);
             LoadConfig();
 
             ResolveDesktopMode();
@@ -360,6 +369,13 @@ namespace AutoGameDetect
 
             if (!_desktopValid)
                 Balloon(T("capture_failed_title"), T("capture_failed"));
+
+            // 默认配置目录写不进去（常见于安全软件拦截）时明确告知，避免"设置怎么不保存"
+            if (_dataDirFallback)
+            {
+                Log("data dir fallback -> " + dir);
+                Balloon(T("data_dir_title"), string.Format(T("data_dir_fallback"), dir));
+            }
 
             UpdateTrayText();
             Log("desktop target = " + ModeStr(_desktopMode) + ", valid=" + _desktopValid
@@ -373,6 +389,18 @@ namespace AutoGameDetect
             _pollTimer.Interval = 3000;
             _pollTimer.Tick += CheckGames;
             _pollTimer.Start();
+
+            // 再次运行 exe 时会置位该标志 → 唤起设置窗口。
+            // 托盘图标被 Windows 折叠进"隐藏的图标"里时，用户靠这个也能打开界面
+            _activateTimer = new System.Windows.Forms.Timer();
+            _activateTimer.Interval = 300;
+            _activateTimer.Tick += (s, e) =>
+            {
+                if (!_activateRequested) return;
+                _activateRequested = false;
+                ShowConfig();
+            };
+            _activateTimer.Start();
 
             // 关机/注销时若正处于 2K，先恢复桌面分辨率
             try
@@ -1861,26 +1889,106 @@ namespace AutoGameDetect
         // 轻量日志：记录捕获/切换/恢复结果，便于事后诊断显示异常
         private static readonly object _logLock = new object();
 
-        // 数据目录：默认 %LOCALAPPDATA%\ResolutionSwitcher；
-        // 设置 AGD_DATA_DIR 可用便携模式（配置和日志跟着 exe 走）
-        private static string DefaultDataDir()
+        // 数据目录：优先 %LOCALAPPDATA%\ResolutionSwitcher；
+        // 若被安全软件/策略拒绝写入，自动降级到 exe 同级 data\ 或 %APPDATA%，
+        // 保证设置能存下来（日志里会写明最终用了哪个目录）
+        private static string _dataDir = null;
+        private static bool _dataDirFallback = false;
+        private static readonly object _dataDirLock = new object();
+
+        private static string StandardDataDir()
         {
             try
             {
-                string env = Environment.GetEnvironmentVariable("AGD_DATA_DIR");
-                if (!string.IsNullOrEmpty(env)) return env.Trim();
+                return Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "ResolutionSwitcher");
             }
-            catch { }
-            return Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "ResolutionSwitcher");
+            catch { return ""; }
+        }
+
+        // 能否在该目录创建并写入文件（一次真实探测，比权限判断可靠）
+        private static bool IsWritableDir(string dir)
+        {
+            if (string.IsNullOrEmpty(dir)) return false;
+            try
+            {
+                Directory.CreateDirectory(dir);
+                string probe = Path.Combine(dir, ".write-probe-" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                File.WriteAllText(probe, "x", Encoding.UTF8);
+                File.Delete(probe);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        // 降级到 exe 同级目录时，把原来保存在 %LOCALAPPDATA% 里的配置迁移过来，
+        // 避免"换了目录后游戏列表突然空了"（读取通常仍被允许，只是写入被拦）
+        private static void MigrateLegacyConfig(string targetDir)
+        {
+            try
+            {
+                string standard = StandardDataDir();
+                if (string.IsNullOrEmpty(standard)) return;
+                string src = Path.Combine(standard, "monitored_games.txt");
+                string dst = Path.Combine(targetDir, "monitored_games.txt");
+                if (File.Exists(dst) || !File.Exists(src)) return;
+                string content = File.ReadAllText(src, Encoding.UTF8);
+                File.WriteAllText(dst, content, Encoding.UTF8);
+                Log("migrated config: " + src + " -> " + dst);
+            }
+            catch (Exception ex) { Log("migrate config failed: " + ex.Message); }
+        }
+
+        private static string ResolveDataDir()
+        {
+            lock (_dataDirLock)
+            {
+                if (_dataDir != null) return _dataDir;
+
+                string env = "";
+                try { env = (Environment.GetEnvironmentVariable("AGD_DATA_DIR") ?? "").Trim(); }
+                catch { }
+
+                string standard = StandardDataDir();
+                List<string> candidates = new List<string>();
+                if (env.Length > 0) candidates.Add(env);
+                candidates.Add(standard);
+                try
+                {
+                    candidates.Add(Path.Combine(
+                        Path.GetDirectoryName(Application.ExecutablePath) ?? "", "data"));
+                }
+                catch { }
+                try
+                {
+                    candidates.Add(Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                        "ResolutionSwitcher"));
+                }
+                catch { }
+
+                foreach (string dir in candidates)
+                {
+                    if (!IsWritableDir(dir)) continue;
+                    _dataDir = dir;
+                    _dataDirFallback = standard.Length > 0
+                        && !string.Equals(dir, standard, StringComparison.OrdinalIgnoreCase);
+                    return _dataDir;
+                }
+
+                // 全都不行：退回临时目录，至少程序能跑
+                _dataDir = Path.GetTempPath();
+                _dataDirFallback = true;
+                return _dataDir;
+            }
         }
 
         // 惰性解析日志路径：构造早期出错时同样能落盘（否则静默退出无从排查）
         private static string LogPath()
         {
             if (_logPath.Length > 0) return _logPath;
-            try { _logPath = Path.Combine(DefaultDataDir(), "resolution.log"); }
+            try { _logPath = Path.Combine(ResolveDataDir(), "resolution.log"); }
             catch { _logPath = ""; }
             return _logPath;
         }
@@ -1963,6 +2071,12 @@ namespace AutoGameDetect
                 _pollTimer.Dispose();
                 _pollTimer = null;
             }
+            if (_activateTimer != null)
+            {
+                _activateTimer.Stop();
+                _activateTimer.Dispose();
+                _activateTimer = null;
+            }
             if (_configForm != null)
             {
                 try { _configForm.Close(); } catch { }
@@ -2011,13 +2125,44 @@ namespace AutoGameDetect
                     Log("main: mutex createdNew=" + createdNew);
                     if (!createdNew)
                     {
-                        MessageBox.Show(T("main_already"), T("title_already"));
+                        // 已有实例在跑：请它把设置窗口弹出来。
+                        // 这是托盘图标被系统折叠时的兜底入口——再运行一次 exe 就能看到界面
+                        bool signaled = false;
+                        try
+                        {
+                            using (System.Threading.EventWaitHandle ev =
+                                       System.Threading.EventWaitHandle.OpenExisting(ActivateEventName))
+                            {
+                                ev.Set();
+                                signaled = true;
+                            }
+                        }
+                        catch { }
+                        Log("main: second instance, activateRequested=" + signaled);
+                        if (!signaled) MessageBox.Show(T("main_already"), T("title_already"));
                         return;
                     }
-                    AppContext ctx = new AppContext();
-                    Log("main: context ready");
-                    Application.Run(ctx);
-                    Log("main: message loop ended");
+
+                    using (System.Threading.EventWaitHandle ev = new System.Threading.EventWaitHandle(
+                               false, System.Threading.EventResetMode.AutoReset, ActivateEventName))
+                    {
+                        System.Threading.Thread watcher = new System.Threading.Thread(() =>
+                        {
+                            while (true)
+                            {
+                                try { ev.WaitOne(); }
+                                catch { return; }
+                                _activateRequested = true;
+                            }
+                        });
+                        watcher.IsBackground = true;
+                        watcher.Start();
+
+                        AppContext ctx = new AppContext();
+                        Log("main: context ready");
+                        Application.Run(ctx);
+                        Log("main: message loop ended");
+                    }
                 }
             }
             catch (Exception ex)

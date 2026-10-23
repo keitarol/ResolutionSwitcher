@@ -50,7 +50,7 @@ Windows 托盘工具：玩 3A 游戏时自动把分辨率从 4K 切换到 2K (25
 
 | 项目 | 位置 |
 |------|------|
-| 监控游戏列表 + 恢复目标 | `%LOCALAPPDATA%\ResolutionSwitcher\monitored_games.txt` |
+| 监控游戏列表 + 恢复目标 | `%LOCALAPPDATA%\ResolutionSwitcher\monitored_games.txt`（若被安全软件拒绝写入，自动降级到 exe 同级 `data\` 目录，并把旧配置迁移过去） |
 | 诊断日志 | `%LOCALAPPDATA%\ResolutionSwitcher\resolution.log`（超过 512 KB 自动轮转为 `.old`） |
 | 开机自启 | 注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`（可在设置里开关） |
 
@@ -98,6 +98,14 @@ csc /target:winexe /out:AutoGameDetect.exe AutoGameDetect.cs
 - 轮询跑在 WinForms 定时器上（UI 线程），所以列表读写不存在竞态；托盘菜单与气球通知也在 UI 线程发出
 
 ## 📝 更新日志
+
+### v1.3.1
+
+- 新增：**再次运行 exe 即可唤起设置窗口**——托盘图标被 Windows 折叠进"隐藏的图标"里时，双击程序图标一次就能打开界面（不会再弹"已在运行"）
+- 新增：**配置目录自动降级**——`%LOCALAPPDATA%` 被安全软件（如腾讯电脑管家）拦截写入时，自动改用 exe 同级 `data\` 目录，并提示实际使用的位置；旧配置会自动迁移过来
+- 修复：写盘失败时完全静默，导致"设置怎么都存不下来"却毫无提示
+
+> 如果想让配置回到 `%LOCALAPPDATA%`，把 `AutoGameDetect.exe` 加入安全软件的信任区/白名单即可。
 
 ### v1.3.0
 

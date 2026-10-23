@@ -31,7 +31,7 @@ namespace AutoGameDetect
                 StringComparison.OrdinalIgnoreCase);
 
         // 中文文案（key 统一，便于对照维护）
-        private const string AppVersion = "1.2.3";
+        private const string AppVersion = "1.2.4";
         private static readonly Dictionary<string, string> Dict_ZH = new Dictionary<string, string>
         {
             { "win_title", "分辨率自动监控 - 设置" },
@@ -227,6 +227,7 @@ namespace AutoGameDetect
         private EventWaitHandle _showEvent;                        // 第二实例发信号 → 唤起设置窗口
         private Bitmap _trayBmp;                                   // 托盘图标位图：保持引用防止 GC 回收导致图标消失
         private bool _autostart = false;                           // 开机自启时不弹设置窗口
+        private TrayHost _trayHost;                                // 隐藏窗口：监听 TaskbarCreated 以自动重挂托盘图标
 
         // --- UI components ---
         private Form _configForm;
@@ -281,6 +282,9 @@ namespace AutoGameDetect
             _trayIcon.ContextMenuStrip = menu;
             _trayIcon.DoubleClick += (s, e) => ShowConfig();
 
+            // 隐藏窗口：Explorer 重启(TaskbarCreated)时自动重挂托盘图标（所有 Windows 通用）
+            _trayHost = new TrayHost(ReAddTrayIcon);
+
             if (!_origValid)
                 ShowBalloon(T("capture_failed_title"), T("capture_failed"));
 
@@ -295,6 +299,47 @@ namespace AutoGameDetect
 
             // Start polling (every 3 seconds)
             _pollTimer = new System.Threading.Timer(CheckGames, null, 5000, 3000);
+        }
+
+        // ================================================================
+        //  Tray icon: TaskbarCreated 自愈（Explorer 重启后图标自动恢复）
+        // ================================================================
+        class TrayHost : NativeWindow
+        {
+            private int _taskbarCreatedMsg;
+            private Action _onCreated;
+
+            [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+            private static extern int RegisterWindowMessage(string msg);
+
+            public TrayHost(Action onCreated)
+            {
+                _onCreated = onCreated;
+                CreateHandle(new CreateParams());
+                _taskbarCreatedMsg = RegisterWindowMessage("TaskbarCreated");
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == _taskbarCreatedMsg && _taskbarCreatedMsg != 0)
+                {
+                    try { if (_onCreated != null) _onCreated(); }
+                    catch { }
+                }
+                base.WndProc(ref m);
+            }
+        }
+
+        private void ReAddTrayIcon()
+        {
+            try
+            {
+                if (_trayIcon == null) return;
+                _trayIcon.Visible = false;
+                _trayIcon.Visible = true;
+                UpdateTrayText();
+            }
+            catch { }
         }
 
         private int GetEnabledCount()

@@ -41,6 +41,21 @@ Windows 托盘工具：玩 3A 游戏时自动把分辨率从 4K 切换到 2K (25
 
 > 💡 LOL 这类不吃配置的游戏**不要勾选**，正常启动即可享受 4K 满画质。
 
+### 📦 安装建议
+
+- **推荐安装到 `C:\Program Files\ResolutionSwitcher\`**（或其他受信任的程序目录），然后为 exe 创建快捷方式。
+- 标准 Windows 10/11 从任意路径运行都没有问题；但**部分 OEM 定制系统（品牌笔记本预装镜像）和安全软件会强制「仅受信任目录的程序可注册托盘图标」**。若托盘图标不出现，先尝试把程序放到 `Program Files` 下运行。
+- 开机自启：将快捷方式放入 `shell:startup`（建议目标加 `--autostart` 参数，静默启动不弹窗）。
+
+## 🩺 常见问题
+
+| 现象 | 原因与解决 |
+|------|-----------|
+| **SmartScreen 提示「无法识别的应用」** | 程序未做商业代码签名。点「更多信息 → 仍要运行」即可；每次发布新版本需重新允许一次。彻底消除需购买代码签名证书（OV/EV，约 $200-400/年）或使用 Azure Trusted Signing |
+| **托盘区看不到图标** | ① Windows 11 默认把新图标藏在任务栏 `^` 折叠区，拖出来即可；② 部分 OEM/安全软件环境要求程序位于受信任目录（见上方安装建议）；③ 若装了安全软件（如腾讯电脑管家），把本程序加入其信任区/白名单 |
+| **Explorer 重启后图标消失** | v1.2.4+ 已内置 TaskbarCreated 自愈，图标会自动重挂；旧版本重启程序即可 |
+| **游戏退出后分辨率没恢复** | 检查 `%LOCALAPPDATA%\ResolutionSwitcher\resolution.log`，把日志反馈到 GitHub Issue |
+
 ## ⚙️ 配置存储
 
 | 项目 | 位置 |
@@ -53,7 +68,7 @@ Windows 托盘工具：玩 3A 游戏时自动把分辨率从 4K 切换到 2K (25
 需要 .NET Framework 4.x（Windows 自带）和 C# 编译器 `csc`：
 
 ```bat
-csc /target:winexe /out:AutoGameDetect.exe AutoGameDetect.cs
+csc /target:winexe /win32icon:app.ico /out:AutoGameDetect.exe AutoGameDetect.cs
 ```
 
 或直接用 Visual Studio 打开源码编译。
